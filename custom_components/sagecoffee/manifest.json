@@ -6,6 +6,6 @@
   "documentation": "https://github.com/simonjgreen/sageha",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/simonjgreen/sageha/issues",
-  "requirements": ["sagecoffee==0.3.0"],
-  "version": "1.4.2"
+  "requirements": ["sagecoffee @ git+https://github.com/claesmathias/sagecoffee@92b8e9a4f0076d78dc410ec1daf7da4c2e78c387"],
+  "version": "1.5.0"
 }
