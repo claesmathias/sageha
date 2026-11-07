@@ -13,11 +13,16 @@ from homeassistant.exceptions import (
     ServiceValidationError,
 )
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.sagecoffee import async_migrate_entry
 from custom_components.sagecoffee.const import (
     CONF_BRAND,
+    CONF_LIVE_ACTIVITY,
+    CONF_LIVE_ACTIVITY_TARGETS,
     CONF_MACHINE_TYPE_LEGACY,
     CONF_REFRESH_TOKEN,
     DOMAIN,
@@ -292,3 +297,40 @@ async def test_disable_wake_schedule(
     )
 
     mock_client.disable_wake_schedule.assert_awaited_once_with(serial=MOCK_SERIAL)
+
+
+@pytest.mark.parametrize(
+    ("options", "expect_activity"),
+    [
+        ({}, False),
+        ({CONF_LIVE_ACTIVITY: False, CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"]}, False),
+        ({CONF_LIVE_ACTIVITY: True, CONF_LIVE_ACTIVITY_TARGETS: []}, False),
+        ({CONF_LIVE_ACTIVITY: True, CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"]}, True),
+    ],
+)
+async def test_live_activity_follows_options(
+    hass: HomeAssistant,
+    mock_client: MagicMock,
+    config_entry: MockConfigEntry,
+    options: dict,
+    expect_activity: bool,
+) -> None:
+    """The Live Activity runs only when enabled with at least one device."""
+    calls = async_mock_service(hass, "notify", "mobile_app_phone")
+    hass.config_entries.async_update_entry(config_entry, options=options)
+    warming = DeviceState(
+        raw_data={"reported": {"state": "warming", "boiler": [{"cur_temp": 40.0, "temp_sp": 93.0}]}},
+        serial_number=MOCK_SERIAL,
+        version=1,
+    )
+    mock_client.get_last_state.return_value = warming
+
+    assert await setup_entry(hass, config_entry)
+
+    assert bool(calls) is expect_activity
+
+    # Unloading ends the activity that was showing.
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    if expect_activity:
+        assert calls[-1].data["message"] == "clear_notification"

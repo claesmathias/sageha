@@ -11,11 +11,22 @@ from sagecoffee.auth import DEFAULT_CLIENT_ID, AuthClient, MfaRequiredError
 from sagecoffee.models import TokenSet
 import voluptuous as vol
 
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import callback
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.selector import (
+    BooleanSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     TextSelector,
@@ -26,7 +37,11 @@ from homeassistant.helpers.selector import (
 from .const import (
     BRAND_OPTIONS,
     CONF_BRAND,
+    CONF_LIVE_ACTIVITY,
+    CONF_LIVE_ACTIVITY_DISMISS,
+    CONF_LIVE_ACTIVITY_TARGETS,
     CONF_REFRESH_TOKEN,
+    DEFAULT_LIVE_ACTIVITY_DISMISS,
     DOMAIN,
     MACHINE_TYPE_SAGE,
 )
@@ -70,6 +85,12 @@ class SageCoffeeConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Sage Coffee."""
 
     VERSION = 2
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SageCoffeeOptionsFlow:
+        """Return the options flow."""
+        return SageCoffeeOptionsFlow()
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -337,4 +358,74 @@ class SageCoffeeConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "bootstrap_command": "sagectl bootstrap --username your.email@example.com"
             },
+        )
+
+
+class SageCoffeeOptionsFlow(OptionsFlowWithReload):
+    """Handle Sage Coffee options (Live Activity)."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure the warm-up Live Activity."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if user_input[CONF_LIVE_ACTIVITY] and not user_input.get(
+                CONF_LIVE_ACTIVITY_TARGETS
+            ):
+                errors[CONF_LIVE_ACTIVITY_TARGETS] = "no_targets"
+            else:
+                return self.async_create_entry(
+                    data={
+                        **user_input,
+                        CONF_LIVE_ACTIVITY_DISMISS: int(
+                            user_input[CONF_LIVE_ACTIVITY_DISMISS]
+                        ),
+                    }
+                )
+
+        # Live Activities are a companion app feature, so offer its notifiers
+        mobile_targets = sorted(
+            service
+            for service in self.hass.services.async_services_for_domain("notify")
+            if service.startswith("mobile_app_")
+        )
+        current = {**self.config_entry.options, **(user_input or {})}
+        # Keep targets that are configured but currently unavailable selectable
+        targets = sorted(
+            set(mobile_targets) | set(current.get(CONF_LIVE_ACTIVITY_TARGETS) or [])
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_LIVE_ACTIVITY,
+                        default=current.get(CONF_LIVE_ACTIVITY, False),
+                    ): BooleanSelector(),
+                    vol.Optional(
+                        CONF_LIVE_ACTIVITY_TARGETS,
+                        default=current.get(CONF_LIVE_ACTIVITY_TARGETS) or [],
+                    ): SelectSelector(
+                        SelectSelectorConfig(options=targets, multiple=True)
+                    ),
+                    vol.Required(
+                        CONF_LIVE_ACTIVITY_DISMISS,
+                        default=current.get(
+                            CONF_LIVE_ACTIVITY_DISMISS, DEFAULT_LIVE_ACTIVITY_DISMISS
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=60,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="min",
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
         )

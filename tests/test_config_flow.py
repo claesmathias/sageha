@@ -11,10 +11,16 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.sagecoffee.const import (
     CONF_BRAND,
+    CONF_LIVE_ACTIVITY,
+    CONF_LIVE_ACTIVITY_DISMISS,
+    CONF_LIVE_ACTIVITY_TARGETS,
     CONF_REFRESH_TOKEN,
     DOMAIN,
     MACHINE_TYPE_BREVILLE,
@@ -503,3 +509,76 @@ async def test_password_flow_accepts_lelit_brand(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_BRAND] == MACHINE_TYPE_LELIT
+
+
+async def test_options_flow_lists_companion_app_notifiers(
+    hass: HomeAssistant, existing_entry: MockConfigEntry
+) -> None:
+    """Only companion app notifiers are offered as Live Activity devices."""
+    async_mock_service(hass, "notify", "mobile_app_phone")
+    async_mock_service(hass, "notify", "email")
+
+    result = await hass.config_entries.options.async_init(existing_entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+    selector = result["data_schema"].schema[CONF_LIVE_ACTIVITY_TARGETS]
+    assert selector.config["options"] == ["mobile_app_phone"]
+
+
+async def test_options_flow_saves_live_activity(
+    hass: HomeAssistant, existing_entry: MockConfigEntry, mock_setup_entry: AsyncMock
+) -> None:
+    """Enabling the Live Activity stores the devices and a whole-minute delay."""
+    async_mock_service(hass, "notify", "mobile_app_phone")
+    result = await hass.config_entries.options.async_init(existing_entry.entry_id)
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_LIVE_ACTIVITY: True,
+            CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"],
+            CONF_LIVE_ACTIVITY_DISMISS: 10.0,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert existing_entry.options == {
+        CONF_LIVE_ACTIVITY: True,
+        CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"],
+        CONF_LIVE_ACTIVITY_DISMISS: 10,
+    }
+
+
+async def test_options_flow_requires_a_device_when_enabled(
+    hass: HomeAssistant, existing_entry: MockConfigEntry
+) -> None:
+    """Turning the Live Activity on without choosing a device shows an error."""
+    result = await hass.config_entries.options.async_init(existing_entry.entry_id)
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_LIVE_ACTIVITY: True, CONF_LIVE_ACTIVITY_DISMISS: 5},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_LIVE_ACTIVITY_TARGETS: "no_targets"}
+
+
+async def test_options_flow_keeps_unavailable_configured_device(
+    hass: HomeAssistant, existing_entry: MockConfigEntry
+) -> None:
+    """A configured device whose notifier is missing stays selectable."""
+    hass.config_entries.async_update_entry(
+        existing_entry,
+        options={
+            CONF_LIVE_ACTIVITY: True,
+            CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_old_phone"],
+            CONF_LIVE_ACTIVITY_DISMISS: 5,
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(existing_entry.entry_id)
+
+    selector = result["data_schema"].schema[CONF_LIVE_ACTIVITY_TARGETS]
+    assert selector.config["options"] == ["mobile_app_old_phone"]

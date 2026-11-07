@@ -27,12 +27,15 @@ import voluptuous as vol
 
 from .const import (
     CONF_BRAND,
+    CONF_LIVE_ACTIVITY,
+    CONF_LIVE_ACTIVITY_TARGETS,
     CONF_MACHINE_TYPE_LEGACY,
     CONF_REFRESH_TOKEN,
     DOMAIN,
     MACHINE_TYPE_SAGE,
     PLATFORMS,
 )
+from .live_activity import SageCoffeeLiveActivity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -428,6 +431,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SageCoffeeConfigEntry) -
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Mirror warm-up on mobile devices when enabled in the integration options
+    if entry.options.get(CONF_LIVE_ACTIVITY) and entry.options.get(
+        CONF_LIVE_ACTIVITY_TARGETS
+    ):
+        live_activity = SageCoffeeLiveActivity(hass, coordinator, entry.options)
+        live_activity.async_start()
+        entry.async_on_unload(live_activity.async_stop)
 
     return True
 

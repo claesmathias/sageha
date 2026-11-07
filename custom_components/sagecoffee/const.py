@@ -23,8 +23,14 @@ BRAND_OPTIONS = [
     {"label": "Lelit", "value": MACHINE_TYPE_LELIT},
 ]
 
+# Options (Settings > Devices & services > Sage Coffee > Configure)
+CONF_LIVE_ACTIVITY = "live_activity"
+CONF_LIVE_ACTIVITY_TARGETS = "live_activity_targets"
+CONF_LIVE_ACTIVITY_DISMISS = "live_activity_dismiss_minutes"
+
 # Defaults
 DEFAULT_NAME = "Sage Coffee"
+DEFAULT_LIVE_ACTIVITY_DISMISS = 5
 
 # State mappings
 STATE_READY = "ready"

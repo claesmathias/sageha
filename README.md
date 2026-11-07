@@ -14,6 +14,7 @@ Home Assistant custom integration for Sage/Breville connected coffee machines.
 - **Configuration Sensors**: View theme, brightness, grind size, and more
 - **Wake Schedule**: See when your machine is next scheduled to switch on automatically
 - **Firmware Version**: Check the installed firmware version from the device page
+- **Live Activity**: Follow the warm-up on your phone's Lock Screen through the companion app
 
 ## Supported Machines
 
@@ -58,6 +59,18 @@ sagectl bootstrap --username your.email@example.com
 ```
 
 Then paste the refresh token from `~/.config/sagecoffee/config.toml` into Home Assistant.
+
+### Live Activity
+
+The integration can show the machine warming up as a Live Activity on iOS (Lock Screen and Dynamic Island) or a Live Update on Android, through the Home Assistant companion app. To turn it on, go to **Settings → Devices & services → Sage Coffee → Configure** and set:
+
+- **Show warm-up Live Activity**: on or off
+- **Devices**: the companion app devices to show it on
+- **Keep "Ready" visible for**: how many minutes the activity stays after the machine is ready (0 ends it immediately)
+
+The activity starts when the machine begins warming up, shows the brew boiler's progress towards its target temperature (and the steam boiler temperature on dual boiler machines), changes to "Ready to brew" when the machine is ready, and ends if the machine goes back to sleep. Progress updates are sent at most every 30 seconds, because iOS throttles frequent Live Activity updates.
+
+This needs iOS 17.2 or later, or Android 16 or later, and a companion app version with Live Activity support. See the [companion app documentation](https://companion.home-assistant.io/docs/notifications/live-activities) for details. Away from home, the app needs a working remote connection for the activity to update.
 
 ## Entities
 

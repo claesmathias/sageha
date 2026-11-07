@@ -161,5 +161,26 @@
         "name": "Appliance Name"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Live Activity",
+        "description": "Show the machine warming up as a Live Activity (iOS) or Live Update (Android) in the Home Assistant companion app. Requires iOS 17.2 or later, or Android 16 or later.",
+        "data": {
+          "live_activity": "Show warm-up Live Activity",
+          "live_activity_targets": "Devices",
+          "live_activity_dismiss_minutes": "Keep \"Ready\" visible for"
+        },
+        "data_description": {
+          "live_activity": "Starts when the machine begins warming up and shows progress towards the brew temperature.",
+          "live_activity_targets": "Companion app devices to show the Live Activity on.",
+          "live_activity_dismiss_minutes": "How long the activity stays after the machine is ready. 0 ends it immediately."
+        }
+      }
+    },
+    "error": {
+      "no_targets": "Select at least one device to show the Live Activity on."
+    }
   }
 }
