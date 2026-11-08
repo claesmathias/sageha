@@ -9,6 +9,7 @@ https://companion.home-assistant.io/docs/notifications/live-activities
 from __future__ import annotations
 
 from collections.abc import Mapping
+import asyncio
 import logging
 import re
 import time
@@ -39,6 +40,12 @@ CLEAR_NOTIFICATION = "clear_notification"
 # most this often (the start and the ready update are always sent).
 MIN_UPDATE_INTERVAL = 30
 
+# Steps of the test sequence: (seconds to wait first, progress, brew temp).
+TEST_STEPS = ((0, 25, 40), (5, 70, 78))
+TEST_READY_DELAY = 5
+TEST_CLEAR_DELAY = 20
+TEST_TARGET = 93
+
 ICON_WARMING = "mdi:coffee-maker"
 ICON_READY = "mdi:coffee"
 COLOR = "#A0522D"
@@ -63,6 +70,71 @@ def _warm_up_percent(current: float, target: float, start: float) -> int:
         return 100
     percent = (current - start) / (target - start) * 100
     return max(0, min(100, round(percent)))
+
+
+def _base_data(tag: str) -> dict[str, Any]:
+    """Return the data fields shared by every live notification."""
+    return {
+        "tag": tag,
+        "live_update": True,
+        "progress_max": 100,
+        "progress_bar_direction": "increasing",
+        "notification_icon_color": COLOR,
+        "color": COLOR,
+        "alert_once": True,
+    }
+
+
+async def _async_notify_targets(
+    hass: HomeAssistant, targets: list[str], payload: dict[str, Any]
+) -> None:
+    """Send a payload to every notify target, logging failures."""
+    for target in targets:
+        try:
+            await hass.services.async_call(
+                NOTIFY_DOMAIN, target, payload, blocking=True
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "Failed to update the live activity on notify.%s: %s", target, err
+            )
+
+
+async def async_run_test(
+    hass: HomeAssistant, targets: list[str], serial: str, title: str
+) -> None:
+    """Play a short simulated warm-up so the Live Activity can be checked.
+
+    Uses its own tag, so it doesn't interfere with a real warm-up.
+    """
+    tag = _tag(f"{serial}_test")
+    for delay, progress, temp in TEST_STEPS:
+        await asyncio.sleep(delay)
+        data = _base_data(tag)
+        data.update(
+            progress=progress,
+            critical_text=f"{temp}°C",
+            notification_icon=ICON_WARMING,
+        )
+        await _async_notify_targets(
+            hass,
+            targets,
+            {
+                "title": title,
+                "message": f"Test · Heating · {temp}°C of {TEST_TARGET}°C",
+                "data": data,
+            },
+        )
+    await asyncio.sleep(TEST_READY_DELAY)
+    data = _base_data(tag)
+    data.update(progress=100, critical_text="Ready", notification_icon=ICON_READY)
+    await _async_notify_targets(
+        hass, targets, {"title": title, "message": "Test · Ready to brew", "data": data}
+    )
+    await asyncio.sleep(TEST_CLEAR_DELAY)
+    await _async_notify_targets(
+        hass, targets, {"message": CLEAR_NOTIFICATION, "data": {"tag": tag}}
+    )
 
 
 class SageCoffeeLiveActivity:
@@ -142,15 +214,7 @@ class SageCoffeeLiveActivity:
         self, serial: str, state: Mapping[str, Any]
     ) -> tuple[str, dict[str, Any]]:
         """Build the message and data payload for the current phase."""
-        data: dict[str, Any] = {
-            "tag": _tag(serial),
-            "live_update": True,
-            "progress_max": 100,
-            "progress_bar_direction": "increasing",
-            "notification_icon_color": COLOR,
-            "color": COLOR,
-            "alert_once": True,
-        }
+        data = _base_data(_tag(serial))
 
         if self._phase.get(serial) == STATE_READY:
             data.update(
@@ -253,14 +317,4 @@ class SageCoffeeLiveActivity:
 
     async def _async_notify(self, payload: dict[str, Any]) -> None:
         """Send a payload to every configured notify target."""
-        for target in self._targets:
-            try:
-                await self._hass.services.async_call(
-                    NOTIFY_DOMAIN, target, payload, blocking=True
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning(
-                    "Failed to update the live activity on notify.%s: %s",
-                    target,
-                    err,
-                )
+        await _async_notify_targets(self._hass, self._targets, payload)

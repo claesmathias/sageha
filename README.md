@@ -70,6 +70,8 @@ The integration can show the machine warming up as a Live Activity on iOS (Lock 
 
 The activity starts when the machine begins warming up, shows the brew boiler's progress towards its target temperature (and the steam boiler temperature on dual boiler machines), changes to "Ready to brew" when the machine is ready, and ends if the machine goes back to sleep. Progress updates are sent at most every 30 seconds, because iOS throttles frequent Live Activity updates.
 
+To check that it works without waking the machine, press the **Test Live Activity** button on the machine's device page: it shows a simulated warm-up, then "Ready to brew", and ends after about 30 seconds.
+
 This needs iOS 17.2 or later, or Android 16 or later, and a companion app version with Live Activity support. See the [companion app documentation](https://companion.home-assistant.io/docs/notifications/live-activities) for details. Away from home, the app needs a working remote connection for the activity to update.
 
 ## Entities
@@ -81,6 +83,12 @@ For each coffee machine, the integration creates:
 | Entity | Description                               |
 | ------ | ----------------------------------------- |
 | Power  | Turn the machine on (wake) or off (sleep) |
+
+### Button
+
+| Entity             | Description                                                              |
+| ------------------ | ------------------------------------------------------------------------ |
+| Test Live Activity | Plays a short simulated warm-up on the Live Activity devices (~30 s)     |
 
 ### Text
 
@@ -122,7 +130,7 @@ For each coffee machine, the integration creates:
 | Volume                   | Volume level percentage                        |
 | Auto-off Time            | Idle time before auto-sleep (minutes)          |
 | Next Wake Time           | Next scheduled automatic wake time             |
-| Wake Schedule            | Raw wake schedule summary                      |
+| Wake Schedule            | Enabled wake times, e.g. `Weekdays 06:30 · Weekends 08:00`; every schedule (also disabled ones) is listed in the `schedules` attribute |
 | Temperature Unit         | Configured temperature unit                    |
 | Timezone                 | Configured machine timezone                    |
 | Remote Wake              | Whether remote wake is enabled                 |

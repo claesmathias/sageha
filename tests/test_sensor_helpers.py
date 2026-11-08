@@ -9,7 +9,10 @@ from sagecoffee.models import BOILER_ROLE_BREW, BOILER_ROLE_STEAM
 from custom_components.sagecoffee.sensor import (
     _format_remote_wake,
     _format_temperature_unit,
+    _format_days,
     _format_wake_schedule,
+    _parse_cron,
+    _wake_schedule_attributes,
     _get_boiler_target,
     _get_boiler_temp,
     _get_errors_attributes,
@@ -180,14 +183,55 @@ class TestFormatters:
 
     def test_wake_schedule_summary(self) -> None:
         schedule = [
-            {"cron": "30 6 * * *", "on": True},
-            {"cron": "0 8 * * 6", "on": False},
+            {"cron": "0 8 * * 6,7", "on": True},
+            {"cron": "30 6 * * 1-5", "on": True},
+            {"cron": "0 9 * * 3", "on": False},
             "bogus",
         ]
+        state = {"wake_schedule": schedule}
+        assert _format_wake_schedule(state) == "Weekdays 06:30 · Weekends 08:00"
+        assert _wake_schedule_attributes(state) == {
+            "schedules": [
+                {"time": "06:30", "days": "Weekdays", "enabled": True, "cron": "30 6 * * 1-5"},
+                {"time": "08:00", "days": "Weekends", "enabled": True, "cron": "0 8 * * 6,7"},
+                {"time": "09:00", "days": "Wed", "enabled": False, "cron": "0 9 * * 3"},
+            ]
+        }
+
+    def test_wake_schedule_states(self) -> None:
+        assert _format_wake_schedule({"wake_schedule": []}) == "none"
+        assert _format_wake_schedule({}) == "none"
+        assert _format_wake_schedule({"wake_schedule": [{"on": True}]}) == "none"
         assert (
-            _format_wake_schedule({"wake_schedule_raw": schedule})
-            == "30 6 * * * (on), 0 8 * * 6 (off)"
+            _format_wake_schedule({"wake_schedule": [{"cron": "0 7 * * *", "on": False}]})
+            == "off"
         )
-        assert _format_wake_schedule({"wake_schedule_raw": []}) == "none"
-        assert _format_wake_schedule({"wake_schedule_raw": None}) == "none"
-        assert _format_wake_schedule({"wake_schedule_raw": [{"on": True}]}) is None
+        # Unparseable crons are shown as-is rather than hidden.
+        assert (
+            _format_wake_schedule({"wake_schedule": [{"cron": "weird", "on": True}]})
+            == "weird"
+        )
+        long = [{"cron": f"{m} 6 * * 1,3", "on": True} for m in range(60)]
+        assert len(_format_wake_schedule({"wake_schedule": long})) == 255
+
+    @pytest.mark.parametrize(
+        ("days", "expected"),
+        [
+            ("*", "Every day"),
+            ("1-7", "Every day"),
+            ("1-5", "Weekdays"),
+            ("6,7", "Weekends"),
+            ("0,6", "Weekends"),
+            ("1-4", "Mon–Thu"),
+            ("1,3,5", "Mon, Wed, Fri"),
+            ("2", "Tue"),
+        ],
+    )
+    def test_days(self, days: str, expected: str) -> None:
+        parsed = _parse_cron(f"0 7 * * {days}")
+        assert parsed is not None
+        assert _format_days(parsed[2]) == expected
+
+    @pytest.mark.parametrize("cron", ["", "0 7 * *", "x 7 * * *", "0 25 * * *", "0 7 * * x"])
+    def test_invalid_cron(self, cron: str) -> None:
+        assert _parse_cron(cron) is None

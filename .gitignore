@@ -44,3 +44,4 @@ home-assistant.log*
 
 # Vendor app packages used for protocol comparison
 apk/
+.ha-dev/

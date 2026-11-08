@@ -160,6 +160,11 @@
       "appliance_name": {
         "name": "Appliance Name"
       }
+    },
+    "button": {
+      "test_live_activity": {
+        "name": "Test Live Activity"
+      }
     }
   },
   "options": {
@@ -181,6 +186,11 @@
     },
     "error": {
       "no_targets": "Select at least one device to show the Live Activity on."
+    }
+  },
+  "exceptions": {
+    "no_live_activity_targets": {
+      "message": "Choose at least one device for the Live Activity in the integration's options first."
     }
   }
 }

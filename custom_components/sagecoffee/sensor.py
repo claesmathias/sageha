@@ -36,13 +36,17 @@ class SageCoffeeSensorEntityDescription(SensorEntityDescription):
     steam_boiler: bool = False
 
 
-def _parse_cron_next(
-    cron: str, after: datetime, tz: zoneinfo.ZoneInfo
-) -> datetime | None:
-    """Return the next occurrence of a cron schedule after `after`.
+DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+WEEKDAYS = frozenset(range(5))
+WEEKEND = frozenset({5, 6})
+MAX_STATE_LENGTH = 255
 
-    Expects the device cron format: "MM HH * * DAYS"
-    where DAYS uses 1=Mon through 7=Sun.
+
+def _parse_cron(cron: str) -> tuple[int, int, frozenset[int]] | None:
+    """Parse the device cron format into (hour, minute, weekdays).
+
+    Expects "MM HH * * DAYS" where DAYS uses 1=Mon through 7=Sun (0 is also
+    Sun); weekdays are returned as Python weekdays (0=Mon…6=Sun).
     """
     parts = cron.split()
     if len(parts) != 5:
@@ -50,25 +54,78 @@ def _parse_cron_next(
     try:
         minute = int(parts[0])
         hour = int(parts[1])
-        days_str = parts[4]
     except ValueError:
         return None
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        return None
 
-    # Parse days-of-week into Python weekday set (0=Mon…6=Sun)
-    allowed: set[int] = set()
+    days_str = parts[4]
     if days_str == "*":
-        allowed = set(range(7))
-    else:
-        try:
-            for part in days_str.split(","):
-                if "-" in part:
-                    start, end = part.split("-", 1)
-                    for d in range(int(start), int(end) + 1):
-                        allowed.add((d - 1) % 7)
-                else:
-                    allowed.add((int(part) - 1) % 7)
-        except ValueError:
-            return None
+        return hour, minute, frozenset(range(7))
+    allowed: set[int] = set()
+    try:
+        for part in days_str.split(","):
+            if "-" in part:
+                start, end = part.split("-", 1)
+                for d in range(int(start), int(end) + 1):
+                    allowed.add((d - 1) % 7)
+            else:
+                allowed.add((int(part) - 1) % 7)
+    except ValueError:
+        return None
+    return hour, minute, frozenset(allowed)
+
+
+def _format_days(days: frozenset[int]) -> str:
+    """Describe a set of weekdays, e.g. "Weekdays", "Mon–Thu" or "Mon, Wed"."""
+    if len(days) == 7:
+        return "Every day"
+    if days == WEEKDAYS:
+        return "Weekdays"
+    if days == WEEKEND:
+        return "Weekends"
+    ordered = sorted(days)
+    if len(ordered) >= 3 and ordered[-1] - ordered[0] == len(ordered) - 1:
+        return f"{DAY_NAMES[ordered[0]]}–{DAY_NAMES[ordered[-1]]}"
+    return ", ".join(DAY_NAMES[d] for d in ordered)
+
+
+def _schedule_entries(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the wake schedule as readable entries, sorted by time."""
+    entries: list[dict[str, Any]] = []
+    for entry in state.get("wake_schedule") or []:
+        if not isinstance(entry, dict):
+            continue
+        cron = entry.get("cron")
+        if not isinstance(cron, str) or not cron:
+            continue
+        parsed = _parse_cron(cron)
+        if parsed is None:
+            entries.append(
+                {"time": None, "days": None, "enabled": bool(entry.get("on")), "cron": cron}
+            )
+            continue
+        hour, minute, days = parsed
+        entries.append(
+            {
+                "time": f"{hour:02d}:{minute:02d}",
+                "days": _format_days(days),
+                "enabled": bool(entry.get("on")),
+                "cron": cron,
+            }
+        )
+    entries.sort(key=lambda e: (e["time"] is None, e["time"] or ""))
+    return entries
+
+
+def _parse_cron_next(
+    cron: str, after: datetime, tz: zoneinfo.ZoneInfo
+) -> datetime | None:
+    """Return the next occurrence of a cron schedule after `after`."""
+    parsed = _parse_cron(cron)
+    if parsed is None:
+        return None
+    hour, minute, allowed = parsed
 
     # Walk forward up to 8 days to find the next matching slot
     candidate = after.replace(second=0, microsecond=0)
@@ -178,23 +235,24 @@ def _get_errors_attributes(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _format_wake_schedule(state: dict[str, Any]) -> str | None:
-    """Return a compact wake schedule summary."""
-    schedule = state.get("wake_schedule_raw")
-    if schedule in (None, "", "none"):
+    """Summarise the enabled wake times, e.g. "Weekdays 06:30 · Sat 08:00"."""
+    entries = _schedule_entries(state)
+    if not entries:
         return "none"
-    if isinstance(schedule, list):
-        if not schedule:
-            return "none"
-        entries: list[str] = []
-        for entry in schedule:
-            if not isinstance(entry, dict):
-                continue
-            cron = entry.get("cron")
-            if not cron:
-                continue
-            entries.append(f"{cron} ({'on' if entry.get('on') else 'off'})")
-        return ", ".join(entries) if entries else None
-    return str(schedule)
+    enabled = [e for e in entries if e["enabled"]]
+    if not enabled:
+        return "off"
+    summary = " · ".join(
+        f"{e['days']} {e['time']}" if e["time"] else e["cron"] for e in enabled
+    )
+    if len(summary) > MAX_STATE_LENGTH:
+        summary = summary[: MAX_STATE_LENGTH - 1] + "…"
+    return summary
+
+
+def _wake_schedule_attributes(state: dict[str, Any]) -> dict[str, Any]:
+    """List every wake schedule, including disabled ones."""
+    return {"schedules": _schedule_entries(state)}
 
 
 SENSOR_DESCRIPTIONS: tuple[SageCoffeeSensorEntityDescription, ...] = (
@@ -309,10 +367,9 @@ SENSOR_DESCRIPTIONS: tuple[SageCoffeeSensorEntityDescription, ...] = (
         key="wake_schedule",
         translation_key="wake_schedule",
         name="Wake Schedule",
-        icon="mdi:alarm",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
+        icon="mdi:calendar-clock",
         value_fn=_format_wake_schedule,
+        attributes_fn=_wake_schedule_attributes,
     ),
     SageCoffeeSensorEntityDescription(
         key="temperature_unit",
