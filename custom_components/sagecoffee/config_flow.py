@@ -39,9 +39,12 @@ from .const import (
     CONF_BRAND,
     CONF_LIVE_ACTIVITY,
     CONF_LIVE_ACTIVITY_DISMISS,
+    CONF_LIVE_ACTIVITY_INTERVAL,
+    CONF_LIVE_ACTIVITY_STEAM,
     CONF_LIVE_ACTIVITY_TARGETS,
     CONF_REFRESH_TOKEN,
     DEFAULT_LIVE_ACTIVITY_DISMISS,
+    DEFAULT_LIVE_ACTIVITY_INTERVAL,
     DOMAIN,
     MACHINE_TYPE_SAGE,
 )
@@ -382,6 +385,9 @@ class SageCoffeeOptionsFlow(OptionsFlowWithReload):
                         CONF_LIVE_ACTIVITY_DISMISS: int(
                             user_input[CONF_LIVE_ACTIVITY_DISMISS]
                         ),
+                        CONF_LIVE_ACTIVITY_INTERVAL: int(
+                            user_input[CONF_LIVE_ACTIVITY_INTERVAL]
+                        ),
                     }
                 )
 
@@ -425,6 +431,24 @@ class SageCoffeeOptionsFlow(OptionsFlowWithReload):
                             unit_of_measurement="min",
                         )
                     ),
+                    vol.Required(
+                        CONF_LIVE_ACTIVITY_INTERVAL,
+                        default=current.get(
+                            CONF_LIVE_ACTIVITY_INTERVAL, DEFAULT_LIVE_ACTIVITY_INTERVAL
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=60,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_LIVE_ACTIVITY_STEAM,
+                        default=current.get(CONF_LIVE_ACTIVITY_STEAM, False),
+                    ): BooleanSelector(),
                 }
             ),
             errors=errors,

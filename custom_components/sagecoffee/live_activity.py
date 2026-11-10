@@ -21,8 +21,11 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_LIVE_ACTIVITY_DISMISS,
+    CONF_LIVE_ACTIVITY_INTERVAL,
+    CONF_LIVE_ACTIVITY_STEAM,
     CONF_LIVE_ACTIVITY_TARGETS,
     DEFAULT_LIVE_ACTIVITY_DISMISS,
+    DEFAULT_LIVE_ACTIVITY_INTERVAL,
     DEFAULT_NAME,
     STATE_READY,
     STATE_WARMING,
@@ -35,10 +38,6 @@ _LOGGER = logging.getLogger(__name__)
 
 NOTIFY_DOMAIN = "notify"
 CLEAR_NOTIFICATION = "clear_notification"
-
-# iOS throttles frequent Live Activity pushes, so progress updates are sent at
-# most this often (the start and the ready update are always sent).
-MIN_UPDATE_INTERVAL = 30
 
 # Steps of the test sequence: (seconds to wait first, progress, brew temp).
 TEST_STEPS = ((0, 25, 40), (5, 70, 78))
@@ -153,6 +152,13 @@ class SageCoffeeLiveActivity:
         self._dismiss_minutes: int = int(
             options.get(CONF_LIVE_ACTIVITY_DISMISS, DEFAULT_LIVE_ACTIVITY_DISMISS)
         )
+        # Progress updates are sent at most this often (the start and the ready
+        # update are always sent); they go out at low priority, which iOS may
+        # batch, and it throttles activities that update too frequently.
+        self._interval: int = int(
+            options.get(CONF_LIVE_ACTIVITY_INTERVAL, DEFAULT_LIVE_ACTIVITY_INTERVAL)
+        )
+        self._show_steam: bool = bool(options.get(CONF_LIVE_ACTIVITY_STEAM, False))
         self._phase: dict[str, str] = {}
         self._start_temp: dict[str, float] = {}
         self._last_sent: dict[str, tuple[tuple[Any, ...], float]] = {}
@@ -230,17 +236,22 @@ class SageCoffeeLiveActivity:
         if current is None or target is None:
             return "Heating up", data
 
-        parts = [f"Heating · {current:.0f}°C of {target:.0f}°C"]
+        message = f"Heating · {current:.0f}°C of {target:.0f}°C"
         steam = _boiler(state, "steam") or {}
-        if steam.get("cur_temp") is not None:
-            parts.append(f"Steam {steam['cur_temp']:.0f}°C")
+        if self._show_steam and steam.get("cur_temp") is not None:
+            steam_line = f"Steam {steam['cur_temp']:.0f}°C"
+            if steam.get("temp_sp") is not None:
+                steam_line += f" of {steam['temp_sp']:.0f}°C"
+            message += f"\n{steam_line}"
         data.update(
+            # Based on the shown (whole degree) temperature, so the activity
+            # only updates when the visible temperature changes.
             progress=_warm_up_percent(
-                current, target, self._start_temp.get(serial, current)
+                round(current), target, self._start_temp.get(serial, current)
             ),
             critical_text=f"{current:.0f}°C",
         )
-        return " · ".join(parts), data
+        return message, data
 
     @callback
     def _send_update(
@@ -259,7 +270,7 @@ class SageCoffeeLiveActivity:
             last_fingerprint, last_time = last
             if fingerprint == last_fingerprint:
                 return
-            if now - last_time < MIN_UPDATE_INTERVAL:
+            if now - last_time < self._interval:
                 return
         if not force:
             # Routine progress updates can be delivered at low priority.

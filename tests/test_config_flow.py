@@ -20,6 +20,8 @@ from custom_components.sagecoffee.const import (
     CONF_BRAND,
     CONF_LIVE_ACTIVITY,
     CONF_LIVE_ACTIVITY_DISMISS,
+    CONF_LIVE_ACTIVITY_INTERVAL,
+    CONF_LIVE_ACTIVITY_STEAM,
     CONF_LIVE_ACTIVITY_TARGETS,
     CONF_REFRESH_TOKEN,
     DOMAIN,
@@ -539,6 +541,8 @@ async def test_options_flow_saves_live_activity(
             CONF_LIVE_ACTIVITY: True,
             CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"],
             CONF_LIVE_ACTIVITY_DISMISS: 10.0,
+            CONF_LIVE_ACTIVITY_INTERVAL: 15.0,
+            CONF_LIVE_ACTIVITY_STEAM: True,
         },
     )
 
@@ -547,6 +551,8 @@ async def test_options_flow_saves_live_activity(
         CONF_LIVE_ACTIVITY: True,
         CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"],
         CONF_LIVE_ACTIVITY_DISMISS: 10,
+        CONF_LIVE_ACTIVITY_INTERVAL: 15,
+        CONF_LIVE_ACTIVITY_STEAM: True,
     }
 
 

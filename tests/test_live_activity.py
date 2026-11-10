@@ -18,10 +18,12 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.sagecoffee.const import (
     CONF_LIVE_ACTIVITY,
     CONF_LIVE_ACTIVITY_DISMISS,
+    CONF_LIVE_ACTIVITY_INTERVAL,
+    CONF_LIVE_ACTIVITY_STEAM,
     CONF_LIVE_ACTIVITY_TARGETS,
+    DEFAULT_LIVE_ACTIVITY_INTERVAL,
 )
 from custom_components.sagecoffee.live_activity import (
-    MIN_UPDATE_INTERVAL,
     SageCoffeeLiveActivity,
     _warm_up_percent,
 )
@@ -29,6 +31,7 @@ from custom_components.sagecoffee.live_activity import (
 from .conftest import MOCK_SERIAL
 
 TAG = f"sagecoffee_{MOCK_SERIAL}"
+MIN_UPDATE_INTERVAL = 10
 
 
 class FakeCoordinator:
@@ -80,7 +83,10 @@ def clock() -> Generator[list[float]]:
 
 
 async def start_activity(
-    hass: HomeAssistant, coordinator: FakeCoordinator, dismiss: int = 5
+    hass: HomeAssistant,
+    coordinator: FakeCoordinator,
+    dismiss: int = 5,
+    **options: Any,
 ) -> SageCoffeeLiveActivity:
     """Create and start a Live Activity for the fake coordinator."""
     activity = SageCoffeeLiveActivity(
@@ -90,6 +96,7 @@ async def start_activity(
             CONF_LIVE_ACTIVITY: True,
             CONF_LIVE_ACTIVITY_TARGETS: ["mobile_app_phone"],
             CONF_LIVE_ACTIVITY_DISMISS: dismiss,
+            **options,
         },
     )
     activity.async_start()
@@ -132,7 +139,9 @@ async def test_progress_updates_are_throttled(
 ) -> None:
     """Progress is sent at most every MIN_UPDATE_INTERVAL seconds, quietly."""
     coordinator = FakeCoordinator()
-    await start_activity(hass, coordinator)
+    await start_activity(
+        hass, coordinator, **{CONF_LIVE_ACTIVITY_INTERVAL: MIN_UPDATE_INTERVAL}
+    )
     coordinator.push(machine("warming", brew=20.0))
     await hass.async_block_till_done()
 
@@ -142,30 +151,62 @@ async def test_progress_updates_are_throttled(
     assert len(notify_calls) == 1
 
     clock[0] += 2
-    coordinator.push(machine("warming", brew=56.5))
+    coordinator.push(machine("warming", brew=57.0))
     await hass.async_block_till_done()
     assert len(notify_calls) == 2
-    assert notify_calls[1].data["data"]["progress"] == 50
+    assert notify_calls[1].data["data"]["progress"] == 51
     assert notify_calls[1].data["data"]["silent"] is True
 
     # Unchanged content isn't re-sent, however long it has been.
     clock[0] += MIN_UPDATE_INTERVAL * 10
-    coordinator.push(machine("warming", brew=56.5))
+    coordinator.push(machine("warming", brew=57.0))
     await hass.async_block_till_done()
     assert len(notify_calls) == 2
 
 
-async def test_dual_boiler_message_includes_steam(
+async def test_steam_is_hidden_by_default(
     hass: HomeAssistant, notify_calls: list[ServiceCall], clock: list[float]
 ) -> None:
-    """On dual boiler machines the steam boiler temperature is shown too."""
+    """By default only the brew boiler is shown, also on dual boiler machines."""
     coordinator = FakeCoordinator()
     await start_activity(hass, coordinator)
 
     coordinator.push(machine("warming", brew=40.0, steam=80.0))
     await hass.async_block_till_done()
 
-    assert notify_calls[0].data["message"] == "Heating · 40°C of 93°C · Steam 80°C"
+    assert notify_calls[0].data["message"] == "Heating · 40°C of 93°C"
+
+
+async def test_steam_on_second_line_when_enabled(
+    hass: HomeAssistant, notify_calls: list[ServiceCall], clock: list[float]
+) -> None:
+    """With the option on, the steam boiler is shown on a second line."""
+    coordinator = FakeCoordinator()
+    await start_activity(hass, coordinator, **{CONF_LIVE_ACTIVITY_STEAM: True})
+
+    coordinator.push(machine("warming", brew=40.0, steam=80.0))
+    await hass.async_block_till_done()
+
+    assert notify_calls[0].data["message"] == "Heating · 40°C of 93°C\nSteam 80°C of 135°C"
+
+
+async def test_update_interval_is_configurable(
+    hass: HomeAssistant, notify_calls: list[ServiceCall], clock: list[float]
+) -> None:
+    """A shorter update interval sends progress more often."""
+    coordinator = FakeCoordinator()
+    await start_activity(hass, coordinator, **{CONF_LIVE_ACTIVITY_INTERVAL: 5})
+    coordinator.push(machine("warming", brew=20.0))
+
+    clock[0] += 4
+    coordinator.push(machine("warming", brew=30.0))
+    await hass.async_block_till_done()
+    assert len(notify_calls) == 1
+
+    clock[0] += 2
+    coordinator.push(machine("warming", brew=31.0))
+    await hass.async_block_till_done()
+    assert len(notify_calls) == 2
 
 
 async def test_missing_temperatures_still_start_activity(
@@ -315,3 +356,21 @@ async def test_notify_failure_is_logged(
     await hass.async_block_till_done()
 
     assert "Failed to update the live activity on notify.mobile_app_phone" in caplog.text
+
+
+async def test_zero_interval_sends_every_change(
+    hass: HomeAssistant, notify_calls: list[ServiceCall], clock: list[float]
+) -> None:
+    """With 0 every new whole degree is sent at once, but repeats are not."""
+    coordinator = FakeCoordinator()
+    await start_activity(hass, coordinator)
+    assert DEFAULT_LIVE_ACTIVITY_INTERVAL == 0
+    for temp in (20.0, 21.0, 21.2, 22.0):
+        coordinator.push(machine("warming", brew=temp))
+    await hass.async_block_till_done()
+
+    assert [c.data["message"] for c in notify_calls] == [
+        "Heating · 20°C of 93°C",
+        "Heating · 21°C of 93°C",
+        "Heating · 22°C of 93°C",
+    ]

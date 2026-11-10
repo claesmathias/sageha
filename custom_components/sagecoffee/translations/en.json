@@ -175,12 +175,16 @@
         "data": {
           "live_activity": "Show warm-up Live Activity",
           "live_activity_targets": "Devices",
-          "live_activity_dismiss_minutes": "Keep \"Ready\" visible for"
+          "live_activity_dismiss_minutes": "Keep \"Ready\" visible for",
+          "live_activity_update_seconds": "Update every",
+          "live_activity_show_steam": "Show steam boiler temperature"
         },
         "data_description": {
           "live_activity": "Starts when the machine begins warming up and shows progress towards the brew temperature.",
           "live_activity_targets": "Companion app devices to show the Live Activity on.",
-          "live_activity_dismiss_minutes": "How long the activity stays after the machine is ready. 0 ends it immediately."
+          "live_activity_dismiss_minutes": "How long the activity stays after the machine is ready. 0 ends it immediately.",
+          "live_activity_update_seconds": "0 (default) shows each temperature report from the machine straight away (about every 15 seconds while warming up). Raise it only if iOS starts delaying updates.",
+          "live_activity_show_steam": "On dual boiler machines, show the steam boiler temperature on a second line."
         }
       }
     },

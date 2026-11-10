@@ -27,10 +27,13 @@ BRAND_OPTIONS = [
 CONF_LIVE_ACTIVITY = "live_activity"
 CONF_LIVE_ACTIVITY_TARGETS = "live_activity_targets"
 CONF_LIVE_ACTIVITY_DISMISS = "live_activity_dismiss_minutes"
+CONF_LIVE_ACTIVITY_INTERVAL = "live_activity_update_seconds"
+CONF_LIVE_ACTIVITY_STEAM = "live_activity_show_steam"
 
 # Defaults
 DEFAULT_NAME = "Sage Coffee"
 DEFAULT_LIVE_ACTIVITY_DISMISS = 5
+DEFAULT_LIVE_ACTIVITY_INTERVAL = 0
 
 # State mappings
 STATE_READY = "ready"
