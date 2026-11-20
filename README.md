@@ -70,7 +70,7 @@ The integration can show the machine warming up as a Live Activity on iOS (Lock 
 - **Update every**: the shortest time between temperature updates; 0 (the default) sends every change straight away
 - **Show steam boiler temperature**: on dual boiler machines, show the steam boiler on a second line (off by default)
 
-The activity starts when the machine begins warming up, shows the brew boiler's progress towards its target temperature, changes to "Ready to brew" when the machine is ready, and ends if the machine goes back to sleep. Temperatures arrive by push from the machine, which sends a report about every 15 seconds while warming up, so a warm-up from cold takes around 15 updates. With **Update every** at 0 each report is shown straight away. Progress updates are sent at low priority, which iOS may delay or batch, and iOS may throttle activities that update very often.
+The activity starts when the machine begins warming up, shows the brew boiler's progress towards its target temperature, changes to "Ready to brew" when the machine is ready, and ends if the machine goes back to sleep. Tapping it opens the machine's device page in the companion app. Temperatures arrive by push from the machine, which sends a report about every 15 seconds while warming up, so a warm-up from cold takes around 15 updates. With **Update every** at 0 each report is shown straight away. Progress updates are sent at low priority, which iOS may delay or batch, and iOS may throttle activities that update very often.
 
 To check that it works without waking the machine, press the **Test Live Activity** button on the machine's device page: it shows a simulated warm-up, then "Ready to brew", and ends after about 30 seconds.
 

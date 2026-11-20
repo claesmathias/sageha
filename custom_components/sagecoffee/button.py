@@ -64,6 +64,7 @@ class SageCoffeeTestLiveActivityButton(SageCoffeeEntity, ButtonEntity):
             self.hass,
             async_run_test(
                 self.hass,
+                self._entry.entry_id,
                 targets,
                 self._serial,
                 self._appliance.name or DEFAULT_NAME,

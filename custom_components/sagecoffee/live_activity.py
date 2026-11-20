@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
 
 from .const import (
@@ -27,6 +28,7 @@ from .const import (
     DEFAULT_LIVE_ACTIVITY_DISMISS,
     DEFAULT_LIVE_ACTIVITY_INTERVAL,
     DEFAULT_NAME,
+    DOMAIN,
     STATE_READY,
     STATE_WARMING,
 )
@@ -71,9 +73,28 @@ def _warm_up_percent(current: float, target: float, start: float) -> int:
     return max(0, min(100, round(percent)))
 
 
-def _base_data(tag: str) -> dict[str, Any]:
-    """Return the data fields shared by every live notification."""
-    return {
+def _device_url(hass: HomeAssistant, entry_id: str | None, serial: str) -> str | None:
+    """Return the path of the machine's device page in Home Assistant."""
+    if entry_id is None:
+        return None
+    registry = dr.async_get(hass)
+    identifier = (DOMAIN, serial)
+    if hasattr(registry, "async_get_device_by_identifier"):
+        device = registry.async_get_device_by_identifier(identifier, entry_id)
+    else:  # Home Assistant before 2026.11
+        device = registry.async_get_device(identifiers={identifier})
+    return f"/config/devices/device/{device.id}" if device else None
+
+
+def _base_data(
+    hass: HomeAssistant, entry_id: str | None, serial: str, tag: str
+) -> dict[str, Any]:
+    """Return the data fields shared by every live notification.
+
+    Tapping the activity opens the machine's device page (``url`` on iOS,
+    ``clickAction`` on Android).
+    """
+    data: dict[str, Any] = {
         "tag": tag,
         "live_update": True,
         "progress_max": 100,
@@ -82,6 +103,10 @@ def _base_data(tag: str) -> dict[str, Any]:
         "color": COLOR,
         "alert_once": True,
     }
+    if url := _device_url(hass, entry_id, serial):
+        data["url"] = url
+        data["clickAction"] = url
+    return data
 
 
 async def _async_notify_targets(
@@ -100,7 +125,11 @@ async def _async_notify_targets(
 
 
 async def async_run_test(
-    hass: HomeAssistant, targets: list[str], serial: str, title: str
+    hass: HomeAssistant,
+    entry_id: str,
+    targets: list[str],
+    serial: str,
+    title: str,
 ) -> None:
     """Play a short simulated warm-up so the Live Activity can be checked.
 
@@ -109,7 +138,7 @@ async def async_run_test(
     tag = _tag(f"{serial}_test")
     for delay, progress, temp in TEST_STEPS:
         await asyncio.sleep(delay)
-        data = _base_data(tag)
+        data = _base_data(hass, entry_id, serial, tag)
         data.update(
             progress=progress,
             critical_text=f"{temp}°C",
@@ -125,7 +154,7 @@ async def async_run_test(
             },
         )
     await asyncio.sleep(TEST_READY_DELAY)
-    data = _base_data(tag)
+    data = _base_data(hass, entry_id, serial, tag)
     data.update(progress=100, critical_text="Ready", notification_icon=ICON_READY)
     await _async_notify_targets(
         hass, targets, {"title": title, "message": "Test · Ready to brew", "data": data}
@@ -158,6 +187,8 @@ class SageCoffeeLiveActivity:
         self._interval: int = int(
             options.get(CONF_LIVE_ACTIVITY_INTERVAL, DEFAULT_LIVE_ACTIVITY_INTERVAL)
         )
+        entry = getattr(coordinator, "config_entry", None)
+        self._entry_id: str | None = entry.entry_id if entry else None
         self._show_steam: bool = bool(options.get(CONF_LIVE_ACTIVITY_STEAM, False))
         self._phase: dict[str, str] = {}
         self._start_temp: dict[str, float] = {}
@@ -220,7 +251,7 @@ class SageCoffeeLiveActivity:
         self, serial: str, state: Mapping[str, Any]
     ) -> tuple[str, dict[str, Any]]:
         """Build the message and data payload for the current phase."""
-        data = _base_data(_tag(serial))
+        data = _base_data(self._hass, self._entry_id, serial, _tag(serial))
 
         if self._phase.get(serial) == STATE_READY:
             data.update(

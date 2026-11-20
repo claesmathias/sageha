@@ -8,7 +8,7 @@ import pytest
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -69,6 +69,12 @@ async def test_press_plays_test_sequence(
     ]
     assert {c.data["data"]["tag"] for c in calls} == {TEST_TAG}
     assert calls[0].data["data"]["live_update"] is True
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        ("sagecoffee", MOCK_SERIAL), config_entry.entry_id
+    )
+    assert device
+    assert calls[0].data["data"]["url"] == f"/config/devices/device/{device.id}"
+    assert calls[0].data["data"]["clickAction"] == f"/config/devices/device/{device.id}"
     assert calls[1].data["data"]["progress"] == 70
     assert calls[2].data["data"]["progress"] == 100
 

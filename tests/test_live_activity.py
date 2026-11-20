@@ -10,7 +10,9 @@ import pytest
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
     async_fire_time_changed,
     async_mock_service,
 )
@@ -39,6 +41,7 @@ class FakeCoordinator:
 
     def __init__(self) -> None:
         self.appliances = [SimpleNamespace(serial_number=MOCK_SERIAL, name="Kitchen")]
+        self.config_entry: Any = None
         self._states: dict[str, dict[str, Any]] = {}
         self._listeners: list[Callable[[], None]] = []
 
@@ -374,3 +377,39 @@ async def test_zero_interval_sends_every_change(
         "Heating · 21°C of 93°C",
         "Heating · 22°C of 93°C",
     ]
+
+
+async def test_tap_opens_device_page(
+    hass: HomeAssistant, notify_calls: list[ServiceCall], clock: list[float]
+) -> None:
+    """Tapping the activity opens the machine's device page in the app."""
+    entry = MockConfigEntry(domain="sagecoffee")
+    entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("sagecoffee", MOCK_SERIAL)}
+    )
+    coordinator = FakeCoordinator()
+    coordinator.config_entry = entry
+    await start_activity(hass, coordinator, dismiss=0)
+    coordinator.push(machine("warming", brew=20.0))
+    coordinator.push(machine("ready", brew=93.0))
+    await hass.async_block_till_done()
+
+    path = f"/config/devices/device/{device.id}"
+    for call in notify_calls[:2]:
+        assert call.data["data"]["url"] == path
+        assert call.data["data"]["clickAction"] == path
+    # The clear message only needs the tag.
+    assert notify_calls[2].data["data"] == {"tag": TAG}
+
+
+async def test_no_tap_action_without_device(
+    hass: HomeAssistant, notify_calls: list[ServiceCall], clock: list[float]
+) -> None:
+    """Without a registered device, no tap action is added."""
+    coordinator = FakeCoordinator()
+    await start_activity(hass, coordinator)
+    coordinator.push(machine("warming", brew=20.0))
+    await hass.async_block_till_done()
+
+    assert "url" not in notify_calls[0].data["data"]
