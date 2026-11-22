@@ -9,7 +9,7 @@ import pytest
 from sagecoffee.models import DeviceState
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from .conftest import MOCK_SERIAL
@@ -355,3 +355,80 @@ async def test_report_without_state_field(
     assert hass.states.get(volume).state != "unavailable"
     ids = boiler_entity_ids(hass)
     assert read(hass, ids)["brew_temp"] == "93.3"
+
+
+def connection_issue(hass: HomeAssistant, entry: MockConfigEntry) -> Any:
+    """Return the "connection lost" repair issue for the entry, if any."""
+    return ir.async_get(hass).async_get_issue("sagecoffee", f"connection_lost_{entry.entry_id}")
+
+
+async def test_repair_issue_when_connection_stays_down(
+    hass: HomeAssistant,
+    mock_client: MagicMock,
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long outage shows a repair issue, which goes away once reports resume."""
+    monkeypatch.setattr("custom_components.sagecoffee.CONNECTION_ISSUE_AFTER", 0.02)
+    gate = asyncio.Event()
+    calls = 0
+
+    async def tail_state():
+        nonlocal calls
+        calls += 1
+        if not gate.is_set():
+            raise RuntimeError("cloud unreachable")
+        yield make_state("ready", (131.0, 131.0), (93.3, 93.3))
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("custom_components.sagecoffee.WS_RESTART_DELAY_INITIAL", 0.01)
+    monkeypatch.setattr("custom_components.sagecoffee.WS_RESTART_DELAY_MAX", 0.01)
+    mock_client.tail_state = tail_state
+    mock_client.get_last_state.return_value = None
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+
+    await wait_for(hass, lambda: connection_issue(hass, config_entry) is not None)
+    issue = connection_issue(hass, config_entry)
+    assert issue.translation_key == "connection_lost"
+    assert issue.severity == ir.IssueSeverity.ERROR
+    assert issue.translation_placeholders["error"] == "cloud unreachable"
+
+    gate.set()
+    await wait_for(hass, lambda: connection_issue(hass, config_entry) is None)
+
+
+async def test_short_outage_raises_no_issue(
+    hass: HomeAssistant,
+    mock_client: MagicMock,
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stream that reconnects quickly doesn't show a repair issue."""
+    await setup_with_script(
+        hass,
+        mock_client,
+        config_entry,
+        monkeypatch,
+        RuntimeError("blip"),
+        [make_state("ready", (131.0, 131.0), (93.3, 93.3))],
+    )
+    ids = boiler_entity_ids(hass)
+    await wait_for(hass, lambda: read(hass, ids)["brew_temp"] == "93.3")
+    assert connection_issue(hass, config_entry) is None
+
+
+async def test_unload_removes_issue(
+    hass: HomeAssistant,
+    mock_client: MagicMock,
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unloading the entry removes a showing repair issue."""
+    monkeypatch.setattr("custom_components.sagecoffee.CONNECTION_ISSUE_AFTER", 0)
+    await setup_with_script(
+        hass, mock_client, config_entry, monkeypatch, RuntimeError("down")
+    )
+    await wait_for(hass, lambda: connection_issue(hass, config_entry) is not None)
+
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    assert connection_issue(hass, config_entry) is None

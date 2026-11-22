@@ -234,6 +234,7 @@ If you can see your machine in the official Sage/Breville mobile app but it's no
 ### Connection Issues
 
 - The integration uses WebSocket for real-time updates; ensure your Home Assistant instance can reach `iot-api-ws.breville.com`
+- If the connection to the Sage/Breville cloud is lost, the entities become unavailable and the integration keeps reconnecting by itself. If it is still down after 5 minutes, a "Sage Coffee lost its connection to the cloud" message appears under **Settings → Repairs**; it disappears once the connection is back
 - Check Home Assistant logs for detailed error messages
 
 ### Machine Not Found

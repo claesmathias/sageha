@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -20,9 +21,13 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
-from homeassistant.helpers import config_validation as cv, httpx_client
+from homeassistant.helpers import (
+    config_validation as cv,
+    httpx_client,
+    issue_registry as ir,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.util import ssl as ssl_util
+from homeassistant.util import dt as dt_util, ssl as ssl_util
 import voluptuous as vol
 
 from .const import (
@@ -42,6 +47,10 @@ _LOGGER = logging.getLogger(__name__)
 # Delay before restarting a failed state stream, doubled up to the maximum
 WS_RESTART_DELAY_INITIAL = 5
 WS_RESTART_DELAY_MAX = 300
+# Raise a repair issue once the stream has been down this long, so short
+# blips that reconnect by themselves don't alert anyone.
+CONNECTION_ISSUE_AFTER = 300
+ISSUE_CONNECTION_LOST = "connection_lost"
 
 SERVICE_SET_WAKE_SCHEDULE = "set_wake_schedule"
 SERVICE_DISABLE_WAKE_SCHEDULE = "disable_wake_schedule"
@@ -98,6 +107,53 @@ class SageCoffeeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.appliances = appliances
         self._ws_task: asyncio.Task | None = None
         self._states: dict[str, Any] = {}
+        # When the stream first failed (monotonic and wall clock), and whether
+        # a repair issue is showing for it.
+        self._down_since: float | None = None
+        self._down_since_wall: str | None = None
+        self._issue_raised = False
+
+    @property
+    def _issue_id(self) -> str:
+        """Return the repair issue ID for this config entry."""
+        return f"{ISSUE_CONNECTION_LOST}_{self.config_entry.entry_id}"
+
+    def _mark_connection_failed(self, err: Exception) -> None:
+        """Track how long the stream is down; raise a repair issue if too long."""
+        now = time.monotonic()
+        if self._down_since is None:
+            self._down_since = now
+            self._down_since_wall = dt_util.now().strftime("%Y-%m-%d %H:%M")
+        if self._issue_raised or now - self._down_since < CONNECTION_ISSUE_AFTER:
+            return
+        _LOGGER.error(
+            "Lost the connection to the Sage/Breville cloud since %s: %s",
+            self._down_since_wall,
+            err,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_CONNECTION_LOST,
+            translation_placeholders={
+                "name": self.config_entry.title,
+                "since": self._down_since_wall or "",
+                "error": str(err) or type(err).__name__,
+            },
+        )
+        self._issue_raised = True
+
+    def _mark_connected(self) -> None:
+        """Clear the outage tracking and its repair issue."""
+        if self._issue_raised:
+            _LOGGER.info("Connection to the Sage/Breville cloud restored")
+            ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
+            self._issue_raised = False
+        self._down_since = None
+        self._down_since_wall = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Return the current cached state data."""
@@ -187,6 +243,7 @@ class SageCoffeeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     self._update_state_from_device(state)
                     self.async_set_updated_data(self._states)
+                    self._mark_connected()
                     delay = WS_RESTART_DELAY_INITIAL
             except asyncio.CancelledError:
                 _LOGGER.debug("WebSocket listener cancelled")
@@ -205,6 +262,7 @@ class SageCoffeeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Without a stream the values go stale, so mark entities unavailable
             # until the next state report arrives.
             self.async_set_update_error(err)
+            self._mark_connection_failed(err)
             _LOGGER.warning(
                 "WebSocket stream failed (%s), restarting in %s s", err, delay
             )
@@ -220,6 +278,9 @@ class SageCoffeeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except asyncio.CancelledError:
                 pass
             self._ws_task = None
+        # A stale "connection lost" issue shouldn't outlive the entry.
+        ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
+        self._issue_raised = False
         # Clear stored states and appliances to prevent memory leaks
         self._states.clear()
         self.appliances.clear()

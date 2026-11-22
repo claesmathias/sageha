@@ -214,5 +214,11 @@
     "no_live_activity_targets": {
       "message": "Choose at least one device for the Live Activity in the integration's options first."
     }
+  },
+  "issues": {
+    "connection_lost": {
+      "title": "Sage Coffee lost its connection to the cloud",
+      "description": "{name} hasn't been able to reach the Sage/Breville cloud since {since}, so its entities are unavailable.\n\nLast error: `{error}`\n\nThe integration keeps reconnecting by itself, and this message disappears once the connection is back. If it persists, check that Home Assistant has internet access and can reach `iot-api-ws.breville.com`, and that the machine shows as online in the Sage/Breville app."
+    }
   }
 }
